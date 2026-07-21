@@ -100,6 +100,21 @@ HINT:  Use "SELECT set_user();" or "SELECT reset_user();" instead.
 RESET SESSION AUTHORIZATION; -- should fail
 ERROR:  "SET/RESET SESSION AUTHORIZATION" blocked by set_user
 HINT:  Use "SELECT set_user();" or "SELECT reset_user();" instead.
+-- RESET ALL resets every GUC, including role and session_authorization, so it
+-- must be blocked while escalated.
+RESET ALL; -- should fail
+ERROR:  "RESET ALL" blocked by set_user
+HINT:  Use "SELECT set_user();" or "SELECT reset_user();" instead.
+-- DISCARD ALL implicitly performs the equivalent of RESET ALL, silently
+-- reverting role/session_authorization without reset_user()'s token check or
+-- audit log entry, so it must be blocked while escalated.
+DISCARD ALL; -- should fail
+ERROR:  "DISCARD ALL" blocked by set_user
+HINT:  Use "SELECT set_user();" or "SELECT reset_user();" instead.
+-- narrower DISCARD variants do not touch role and remain allowed
+DISCARD PLANS; -- should succeed
+DISCARD SEQUENCES; -- should succeed
+DISCARD TEMP; -- should succeed
 SELECT SESSION_USER, CURRENT_USER;
  session_user | current_user 
 --------------+--------------
@@ -431,3 +446,19 @@ OR
 
 -- undo those changes
 ABORT;
+-- once no longer escalated, RESET ALL and DISCARD ALL pass through normally
+SELECT reset_user();
+ reset_user 
+------------
+ OK
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+SELECT SESSION_USER, CURRENT_USER;
+ session_user | current_user 
+--------------+--------------
+ postgres     | postgres
+(1 row)
+
+RESET ALL; -- should succeed
+DISCARD ALL; -- should succeed

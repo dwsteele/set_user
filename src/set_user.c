@@ -590,28 +590,70 @@ _PU_HOOK
 							 errmsg("COPY PROGRAM blocked by set_user config")));
 				break;
 			case T_VariableSetStmt:
-				if ((strcmp(((VariableSetStmt *)pstmt->utilityStmt)->name,
-					 "log_statement") == 0) &&
+			{
+				VariableSetStmt *vstmt = (VariableSetStmt *) pstmt->utilityStmt;
+
+				/*
+				 * RESET ALL affects every GUC -- including "role" and
+				 * "session_authorization" -- but its parse node carries no
+				 * ->name (it is NULL, since no single variable is
+				 * targeted). Block it outright while escalated instead of
+				 * falling through to the strcmp() calls below, which would
+				 * otherwise dereference a NULL pointer.
+				 */
+				if (vstmt->kind == VAR_RESET_ALL)
+				{
+					ereport(ERROR,
+							(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+							 errmsg("\"RESET ALL\" blocked by set_user"),
+							 errhint("Use \"SELECT set_user();\" or \"SELECT reset_user();\" instead.")));
+				}
+
+				/* Defensive: no other VariableSetStmt kind should have a
+				 * NULL name, but don't risk a NULL deref if that ever
+				 * changes. */
+				if (vstmt->name == NULL)
+					break;
+
+				if ((strcmp(vstmt->name, "log_statement") == 0) &&
 					Block_LS)
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 							 errmsg("\"SET log_statement\" blocked by set_user config")));
 				}
-				else if ((strcmp(((VariableSetStmt *)pstmt->utilityStmt)->name,
-					 "role") == 0))
+				else if ((strcmp(vstmt->name, "role") == 0))
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 							 errmsg("\"SET/RESET ROLE\" blocked by set_user"),
 							 errhint("Use \"SELECT set_user();\" or \"SELECT reset_user();\" instead.")));
 				}
-				else if ((strcmp(((VariableSetStmt *)pstmt->utilityStmt)->name,
-					 "session_authorization") == 0))
+				else if ((strcmp(vstmt->name, "session_authorization") == 0))
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 							 errmsg("\"SET/RESET SESSION AUTHORIZATION\" blocked by set_user"),
+							 errhint("Use \"SELECT set_user();\" or \"SELECT reset_user();\" instead.")));
+				}
+				break;
+			}
+			case T_DiscardStmt:
+				/*
+				 * DISCARD ALL / DISCARD SESSION implicitly performs the
+				 * equivalent of RESET ALL (among other things), which can
+				 * silently revert "role"/"session_authorization" without
+				 * going through reset_user()'s token check or emitting the
+				 * set_user audit-trail log entry. Block it while escalated,
+				 * same as RESET ALL above. Narrower DISCARD variants
+				 * (PLANS, SEQUENCES, TEMP) don't affect role and are left
+				 * alone.
+				 */
+				if (((DiscardStmt *) pstmt->utilityStmt)->target == DISCARD_ALL)
+				{
+					ereport(ERROR,
+							(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+							 errmsg("\"DISCARD ALL\" blocked by set_user"),
 							 errhint("Use \"SELECT set_user();\" or \"SELECT reset_user();\" instead.")));
 				}
 				break;

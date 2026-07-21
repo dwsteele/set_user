@@ -64,6 +64,17 @@ UPDATE pg_settings SET setting = 'none' WHERE name = 'log_statement';
 -- test reset_user
 RESET ROLE; -- should fail
 RESET SESSION AUTHORIZATION; -- should fail
+-- RESET ALL resets every GUC, including role and session_authorization, so it
+-- must be blocked while escalated.
+RESET ALL; -- should fail
+-- DISCARD ALL implicitly performs the equivalent of RESET ALL, silently
+-- reverting role/session_authorization without reset_user()'s token check or
+-- audit log entry, so it must be blocked while escalated.
+DISCARD ALL; -- should fail
+-- narrower DISCARD variants do not touch role and remain allowed
+DISCARD PLANS; -- should succeed
+DISCARD SEQUENCES; -- should succeed
+DISCARD TEMP; -- should succeed
 SELECT SESSION_USER, CURRENT_USER;
 
 SELECT reset_user();  -- succeed
@@ -222,3 +233,10 @@ OR
 
 -- undo those changes
 ABORT;
+
+-- once no longer escalated, RESET ALL and DISCARD ALL pass through normally
+SELECT reset_user();
+RESET SESSION AUTHORIZATION;
+SELECT SESSION_USER, CURRENT_USER;
+RESET ALL; -- should succeed
+DISCARD ALL; -- should succeed
